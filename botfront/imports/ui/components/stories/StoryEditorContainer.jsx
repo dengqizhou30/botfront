@@ -29,8 +29,6 @@ import BranchTabLabel from './BranchTabLabel';
 import StoryTopMenu from './StoryTopMenu';
 import StoryFooter from './StoryFooter';
 
-import StoryDif from './VisualStoryDif/StoryDif';
-
 function getDefaultPath(story) {
     if (!story.branches) return [story._id];
     const newPath = [story._id];
