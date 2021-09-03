@@ -16,6 +16,7 @@ describe('Training', function() {
     });
     
     afterEach(function() {
+        cy.logout();
         cy.deleteProject('bf');
     });
     
@@ -64,7 +65,7 @@ describe('Training', function() {
         cy.toggleStoryGroupFocused();
         cy.get('.eye.icon.focused').should('have.length', 1);
         cy.train();
-        cy.newChatSesh();
+        cy.wait(1000);
         cy.newChatSesh();
         cy.typeChatMessage('/get_started');
         cy.get('.rw-message').should('have.length', 1); // no response
@@ -75,7 +76,7 @@ describe('Training', function() {
         cy.wait(500);
         cy.get('.eye.icon.focused').should('have.length', 1);
         cy.train();
-        cy.newChatSesh();
+        cy.wait(1000);
         cy.newChatSesh();
         cy.typeChatMessage('/chitchat.greet');
         cy.get('.rw-message').should('have.length', 2); // no response
@@ -101,12 +102,24 @@ describe('Training', function() {
         cy.visit('/chat/bf/');
         cy.get('body').contains('Sharing not enabled for project').should('exist');
         cy.train();
+        cy.visit('project/bf/dialogue');
         cy.dataCy('share-bot').trigger('mouseover');
         cy.dataCy('toggle-bot-sharing').should('exist').should('not.have.class', 'checked')
             .click()
             .should('have.class', 'checked');
         cy.visit('/chat/bf/');
         cy.get('body').contains('Sharing not enabled for project').should('not.exist');
-        cy.get('body').contains('utter_get_started').should('exist');
+        cy.get('body').contains('utter_get_started', { timeout: 10000 }).should('exist');
+        cy.dataCy('environment-dropdown').should('not.exist');
+
+        cy.visit('/project/bf/settings');
+        cy.dataCy('deployment-environments').should('exist');
+        cy.dataCy('deployment-environments').find('.ui.checkbox').last().click();
+        cy.dataCy('save-changes').click();
+        cy.visit('/chat/bf');
+        cy.dataCy('environment-dropdown').click();
+        cy.dataCy('environment-dropdown').find('div').contains('production').click();
+        cy.dataCy('environment-dropdown').click();
+        cy.dataCy('environment-dropdown').find('.active.item').should('have.text', 'production');
     });
 });

@@ -112,6 +112,12 @@ export const validateSimpleJsonFiles = (files, params, type, alias = type) => {
 
 export const validateEndpoints = (files, params) => validateSimpleYamlFiles(files, params, 'endpoints');
 
+export const validateAnalyticsConfig = (files, params) => validateSimpleYamlFiles(files, params, 'analytics', 'analytics config', false);
+
+export const validateWidgetSettings = (files, params) => validateSimpleYamlFiles(files, params, 'widgetsettings', 'widget config', false);
+
+export const validateFormsResults = (files, params) => validateSimpleJsonFiles(files, params, 'formresults', 'form results');
+
 export const validateCredentials = (files, params) => validateSimpleYamlFiles(files, params, 'credentials');
 
 export const validateBfConfig = (files, params) => {
@@ -121,11 +127,15 @@ export const validateBfConfig = (files, params) => {
     // ensure that the default language is in the project's language'
     // sounds a bit weird but when wiping a project, we might not have a file briging the support the the default language
     // having it in projectLanguages will check that it does exist at import
-    if (onlyValidConfigFiles.length > 0 && onlyValidConfigFiles[0].bfconfig.instance) {
+    if (onlyValidConfigFiles.length > 0 && onlyValidConfigFiles[0].bfconfig?.instance) {
         newParams.instanceHost = onlyValidConfigFiles[0].bfconfig.instance.host;
+        newParams.instanceToken = onlyValidConfigFiles[0].bfconfig.instance?.token;
+
         newParams.projectLanguages = Array.from(new Set([...newParams.projectLanguages, onlyValidConfigFiles[0].bfconfig.defaultLanguage]));
     } else {
-        newParams.instanceHost = Instances.findOne({ projectId: params.projectId }).host;
+        const instance = Instances.findOne({ projectId: params.projectId });
+        newParams.instanceHost = instance.host;
+        newParams.instanceToken = instance.token;
         const { defaultLanguage } = Projects.findOne({ _id: params.projectId });
         newParams.projectLanguages = Array.from(new Set([...newParams.projectLanguages, defaultLanguage]));
     }

@@ -9,6 +9,9 @@ import {
     validateIncoming,
     validateConversations,
     validateBfConfig,
+    validateAnalyticsConfig,
+    validateWidgetSettings,
+    validateFormsResults,
 } from '../../../lib/importers/validateMisc.js';
 import { validateRasaConfig } from '../../../lib/importers/validateRasaConfig.js';
 import {
@@ -96,6 +99,10 @@ export async function validateFiles(files, params) {
     [filesWithMessages, newParams] = validateDomain(filesWithMessages, newParams);
     [filesWithMessages, newParams] = validateConversations(filesWithMessages, newParams);
     [filesWithMessages, newParams] = validateIncoming(filesWithMessages, newParams);
+    [filesWithMessages, newParams] = validateAnalyticsConfig(filesWithMessages, newParams);
+    [filesWithMessages, newParams] = validateWidgetSettings(filesWithMessages, newParams);
+    [filesWithMessages, newParams] = validateFormsResults(filesWithMessages, newParams);
+
 
     return [filesWithMessages, newParams];
 }
@@ -125,14 +132,6 @@ export async function readAndValidate(files, params) {
         summary,
         params: finalParams,
     };
-}
-
-export function hasErrors(messages) {
-    let containsErrors = false;
-    messages.forEach((message) => {
-        if (message.errors && message.errors.length > 0) containsErrors = true;
-    });
-    return containsErrors;
 }
 
 const unzipFiles = files => files.reduce(async (acc, file) => {
@@ -165,6 +164,7 @@ export async function importSteps({
     projectId,
     files,
     onlyValidate,
+    ignoreFilesWithErrors = false,
     wipeInvolvedCollections,
     wipeProject,
     fallbackLang: providedFallbackLanguage,
@@ -201,8 +201,8 @@ export async function importSteps({
         summary: wipeProject ? [{ text: 'ALL PROJECT DATA WILL BE ERASED.' }] : [],
     };
     const filesAndValidationData = await readAndValidate(await unzipFiles(files), params);
-
-    if (onlyValidate || hasErrors(filesAndValidationData.fileMessages)) {
+    if (onlyValidate) return filesAndValidationData;
+    if (!ignoreFilesWithErrors && filesAndValidationData.fileMessages.some(f => f?.errors?.length)) {
         return filesAndValidationData;
     }
     const { fileMessages: filesToImport, params: newParams } = filesAndValidationData;

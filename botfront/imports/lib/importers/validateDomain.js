@@ -153,10 +153,10 @@ const mergeDefaultDomains = (files) => {
     );
     const mergedActions = deduplicateArray(allAction); // we are not using a set to deduplicate to keep the order of the actions
     return {
-        slots: allSlots,
-        responses: allResponses,
-        forms: allForms,
-        actions: mergedActions,
+        ...(Object.keys(allSlots).length ? { slots: allSlots } : {}),
+        ...(Object.keys(allResponses).length ? { responses: allResponses } : {}),
+        ...(Object.keys(allForms).length ? { forms: allForms } : {}),
+        ...(mergedActions.length ? { actions: mergedActions } : {}),
     };
 };
 
@@ -195,23 +195,29 @@ const validateADomain = (
         ...(legacyResponsesFromFile || {}),
         ...(modernResponsesFromFile || {}),
     };
-    const formsFromFile = Object.entries(mixedFormsFromFile).reduce(
-        (acc, [name, spec]) => {
+    let formsFromFile = {};
+    if (
+        mixedFormsFromFile
+        && typeof mixedFormsFromFile === 'object'
+        && !Array.isArray(mixedFormsFromFile)
+    ) {
+        formsFromFile = Object.entries(mixedFormsFromFile).reduce((acc, [name, spec]) => {
             if (!('graph_elements' in spec)) return { ...acc, [name]: spec };
             bfForms.push(spec); // "if it has graph elements, it must be a bf form!"
             return acc;
-        },
-        {},
-    );
+        }, {});
+    }
 
-    // do not import slots that are in current default domain or are programmatically generated
-    [...Object.keys(defaultSlots), ...INTERNAL_SLOTS].forEach((k) => {
-        delete slotsFromFile[k];
-    });
-    // do not import responses that are in current default domain
-    Object.keys(defaultResponses).forEach((k) => {
-        delete responsesFromFile[k];
-    });
+    if (!isDefaultDomain) {
+        // do not import slots that are in current default domain or are programmatically generated
+        [...Object.keys(defaultSlots), ...INTERNAL_SLOTS].forEach((k) => {
+            delete slotsFromFile[k];
+        });
+        // do not import responses that are in current default domain
+        Object.keys(defaultResponses).forEach((k) => {
+            delete responsesFromFile[k];
+        });
+    }
 
     const warnings = [];
     const responses = [];

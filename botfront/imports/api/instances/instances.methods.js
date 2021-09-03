@@ -2,7 +2,6 @@
 /* eslint-disable no-restricted-syntax */
 /* eslint-disable no-await-in-loop */
 import { check, Match } from 'meteor/check';
-import queryString from 'query-string';
 import axiosRetry from 'axios-retry';
 import yaml from 'js-yaml';
 import axios from 'axios';
@@ -11,6 +10,7 @@ import { promisify } from 'util';
 import path from 'path';
 
 import {
+    createAxiosForRasa,
     formatError,
     getProjectModelLocalFolder,
     getProjectModelFileName,
@@ -20,10 +20,12 @@ import { getExamples } from '../graphql/examples/mongo/examples';
 import { Instances } from './instances.collection';
 import { CorePolicies } from '../core_policies';
 import { Evaluations } from '../nlu_evaluation';
+import { checkIfCan } from '../../lib/scopes';
 import Activity from '../graphql/activity/activity.model';
 import { getFragmentsAndDomain } from '../../lib/story.utils';
 import { dropNullValuesFromObject } from '../../lib/client.safe.utils';
 import { Projects } from '../project/project.collection';
+
 
 const replaceMongoReservedChars = (input) => {
     if (Array.isArray(input)) return input.map(replaceMongoReservedChars);
@@ -46,13 +48,15 @@ export const createInstance = async (project) => {
         Assets.getText(
             process.env.MODE === 'development'
                 ? 'defaults/private.dev.yaml'
-                : 'defaults/private.yaml',
+                : process.env.ORCHESTRATOR === 'gke'
+                    ? 'defaults/private.gke.yaml'
+                    : 'defaults/private.yaml',
         ),
     );
 
     return Instances.insert({
         name: 'Default Instance',
-        host,
+        host: host.replace(/{PROJECT_NAMESPACE}/g, project.namespace),
         projectId: project._id,
     });
 };
@@ -122,6 +126,7 @@ if (Meteor.isServer) {
         getAppLoggerForFile,
         getAppLoggerForMethod,
         addLoggingInterceptors,
+        auditLog,
     } from '../../../server/logger';
     // eslint-disable-next-line import/order
     import { performance } from 'perf_hooks';
@@ -130,6 +135,7 @@ if (Meteor.isServer) {
 
     Meteor.methods({
         async 'rasa.parse'(instance, examples, options = {}) {
+            checkIfCan('nlu-data:r', instance.projectId);
             check(instance, Object);
             check(examples, Array);
             check(options, Object);
@@ -142,19 +148,12 @@ if (Meteor.isServer) {
             );
             appMethodLogger.debug('Parsing nlu');
             try {
-                const client = axios.create({
-                    baseURL: instance.host,
-                    timeout: 100 * 1000,
-                });
+                const client = await createAxiosForRasa(instance.projectId, { timeout: 100 * 1000 });
                 addLoggingInterceptors(client, appMethodLogger);
                 // axiosRetry(client, { retries: 3, retryDelay: axiosRetry.exponentialDelay });
                 const requests = examples.map(({ text, lang }) => {
                     const payload = Object.assign({}, { text, lang });
-                    const params = {};
-                    if (instance.token) params.token = instance.token;
-                    const qs = queryString.stringify(params);
-                    const url = `${instance.host}/model/parse?${qs}`;
-                    return client.post(url, payload);
+                    return client.post('/model/parse', payload);
                 });
 
                 const result = (await axios.all(requests))
@@ -197,7 +196,11 @@ if (Meteor.isServer) {
             }
         },
 
-        async 'rasa.getTrainingPayload'(projectId, { language = '' } = {}) {
+        async 'rasa.getTrainingPayload'(
+            projectId,
+            { language = '', env = 'development' } = {},
+        ) {
+            checkIfCan(['nlu-data:x', 'projects:r', 'export:x'], projectId);
             check(projectId, String);
             check(language, String);
 
@@ -213,6 +216,7 @@ if (Meteor.isServer) {
             } = await getFragmentsAndDomain(
                 projectId,
                 language,
+                env,
             );
             stories.sort((a, b) => a.story.localeCompare(b.story));
             rules.sort((a, b) => a.rule.localeCompare(b.rule));
@@ -241,11 +245,28 @@ if (Meteor.isServer) {
                 fixed_model_name: getProjectModelFileName(projectId),
                 augmentation_factor: augmentationFactor,
             };
+            auditLog('Retreived training payload for project', {
+                user: Meteor.user(),
+                type: 'execute',
+                projectId,
+                operation: 'nlu-model-execute',
+                resId: projectId,
+                resType: 'nlu-model',
+            });
             return payload;
         },
 
-        async 'rasa.train'(projectId) {
+        async 'rasa.train'(projectId, env = 'development') {
+            checkIfCan('nlu-data:x', projectId);
             check(projectId, String);
+            auditLog('Trained project', {
+                user: Meteor.user(),
+                projectId,
+                type: 'execute',
+                operation: 'nlu-model-trained',
+                resId: projectId,
+                resType: 'nlu-model',
+            });
             const appMethodLogger = getAppLoggerForMethod(
                 trainingAppLogger,
                 'rasa.train',
@@ -256,21 +277,22 @@ if (Meteor.isServer) {
             appMethodLogger.debug(`Training project ${projectId}...`);
             const t0 = performance.now();
             try {
-                const { stories = [], rules = [], ...payload } = await Meteor.call(
-                    'rasa.getTrainingPayload',
-                    projectId,
-                );
+                const {
+                    stories = [],
+                    rules = [],
+                    ...payload
+                } = await Meteor.call('rasa.getTrainingPayload', projectId, { env });
                 payload.fragments = yaml.safeDump(
                     { stories, rules },
                     { skipInvalid: true },
                 );
-
-                const instance = await Instances.findOne({ projectId });
-                const trainingClient = axios.create({
-                    baseURL: instance.host,
-                    timeout: process.env.TRAINING_TIMEOUT || 0,
-                    responseType: 'arraybuffer',
-                });
+                payload.load_model_after = true;
+                // this client is used when telling rasa to load a model
+                const client = await createAxiosForRasa(projectId, { timeout: process.env.TRAINING_TIMEOUT || 0 });
+                addLoggingInterceptors(client, appMethodLogger);
+                const trainingClient = await createAxiosForRasa(projectId,
+                    { timeout: process.env.TRAINING_TIMEOUT || 0, responseType: 'arraybuffer' });
+                
                 addLoggingInterceptors(trainingClient, appMethodLogger);
                 const trainingResponse = await trainingClient.post(
                     '/model/train',
@@ -281,37 +303,14 @@ if (Meteor.isServer) {
                     appMethodLogger.debug(
                         `Training project ${projectId} - ${(t1 - t0).toFixed(2)} ms`,
                     );
-                    const {
-                        headers: { filename },
-                    } = trainingResponse;
-                    const trainedModelPath = path.join(
-                        getProjectModelLocalFolder(),
-                        filename,
-                    );
-                    try {
-                        appMethodLogger.debug(`Saving model at ${trainedModelPath}`);
-                        await promisify(fs.writeFile)(
-                            trainedModelPath,
-                            trainingResponse.data,
-                            'binary',
-                        );
-                    } catch (e) {
-                        const error = `${e.message || e.reason} ${(
-                            e.stack.split('\n')[2] || ''
-                        ).trim()}`;
-                        appMethodLogger.error(
-                            `Could not save trained model to ${trainedModelPath}`,
-                            { error },
-                        );
-                    }
-
-                    await trainingClient.put('/model', { model_file: trainedModelPath });
+                    Meteor.call('call.postTraining', projectId, trainingResponse.data);
                     Activity.update(
                         { projectId, validated: true },
                         { $set: { validated: false } },
                         { multi: true },
                     ).exec();
                 }
+
                 Meteor.call('project.markTrainingStopped', projectId, 'success');
             } catch (e) {
                 console.log(e); // eslint-disable-line no-console
@@ -329,10 +328,18 @@ if (Meteor.isServer) {
         },
 
         async 'rasa.evaluate.nlu'(projectId, language, testData) {
+            checkIfCan('nlu-data:x', projectId);
             check(projectId, String);
             check(language, String);
             check(testData, Match.Maybe(Object));
-
+            auditLog('Evaluated nlu data', {
+                user: Meteor.user(),
+                projectId,
+                type: 'execute',
+                operation: 'nlu-model-evaluate',
+                resId: projectId,
+                resType: 'nlu-model',
+            });
             const appMethodLogger = getAppLoggerForMethod(
                 trainingAppLogger,
                 'rasa.evaluate.nlu',
@@ -345,22 +352,13 @@ if (Meteor.isServer) {
                     rasa_nlu_data: (await getNluDataAndConfig(projectId, language))
                         .rasa_nlu_data,
                 };
-                const params = { language };
-
-                const instance = Instances.findOne({ projectId });
-                if (instance.token) Object.assign(params, { token: instance.token });
-                const qs = queryString.stringify(params);
-                const client = axios.create({
-                    baseURL: instance.host,
-                    timeout: 60 * 60 * 1000,
-                });
+                const client = await createAxiosForRasa(projectId, { timeout: 60 * 60 * 1000 }, { language });
                 addLoggingInterceptors(client, appMethodLogger);
                 axiosRetry(client, {
                     retries: 3,
                     retryDelay: axiosRetry.exponentialDelay,
                 });
-                const url = `${instance.host}/model/test/intents?${qs}`;
-                let results = Promise.await(client.post(url, examples));
+                let results = Promise.await(client.post('/model/test/intents', examples));
 
                 results = replaceMongoReservedChars({
                     intent_evaluation: results.data.intent_evaluation || {},

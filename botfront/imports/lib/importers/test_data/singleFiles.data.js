@@ -16,6 +16,19 @@ import {
     validDomainFr,
     validDomainFrParsed,
 } from './domain.data.js';
+import {
+    validAnalytics,
+    validAnalyticsParsed,
+} from './analytics.data.js';
+import {
+    validWidgetSettings,
+    validWidgetSettingsParsed,
+} from './widgetsettings.data.js';
+import {
+    validFormResults,
+    validFormResultsParsed,
+} from './formresults.data.js';
+
 import { validConversations, validConversationsParsed } from './conversation.data.js';
 
 import { validIncoming, validIncomingParsed } from './incoming.data.js';
@@ -42,6 +55,7 @@ const expectedParams = {
     projectId,
     defaultDomain,
     instanceHost: 'http://localhost:1234',
+    instanceToken: undefined,
     projectLanguages: ['en'],
     fallbackLang: 'en',
     existingStoryGroups: [],
@@ -372,7 +386,6 @@ export const singlesFiles = [
                 warnings: [],
                 env: 'production',
                 filename: 'conversations.production.json',
-               
             },
         ],
         expectedParams: {
@@ -412,7 +425,6 @@ export const singlesFiles = [
                 warnings: [],
                 env: 'production',
                 filename: 'incoming.production.json',
-               
             },
         ],
         expectedParams: {
@@ -439,6 +451,57 @@ export const singlesFiles = [
         expectedParams: {
             ...expectedParams,
             summary: [],
+        },
+    },
+    {
+        name: 'should procces a valid anlytics config file',
+        files: [validAnalytics],
+        params,
+        expectedFiles: [
+            {
+                ...validAnalytics,
+                analytics: validAnalyticsParsed,
+                env: 'development',
+                warnings: [],
+            },
+        ],
+        expectedParams: {
+            ...expectedParams,
+            summary: ['Analytics config will be imported from analyticsconfig.yml.'],
+        },
+    },
+    {
+        name: 'should procces a widget config file',
+        files: [validWidgetSettings],
+        params,
+        expectedFiles: [
+            {
+                ...validWidgetSettings,
+                widgetsettings: validWidgetSettingsParsed,
+                env: 'development',
+                warnings: [],
+            },
+        ],
+        expectedParams: {
+            ...expectedParams,
+            summary: ['Widget config will be imported from widgetsettings.yml.'],
+        },
+    },
+    {
+        name: 'should procces a form result file',
+        files: [validFormResults],
+        params,
+        expectedFiles: [
+            {
+                ...validFormResults,
+                formresults: validFormResultsParsed,
+                env: 'development',
+                warnings: [],
+            },
+        ],
+        expectedParams: {
+            ...expectedParams,
+            summary: ['You will add 2 form results'],
         },
     },
 ];

@@ -1,9 +1,24 @@
-
 import { importSteps } from './import.utils';
 import { checkIfCan } from '../../../lib/scopes';
 import { addMeteorUserToCall } from '../utils/index';
 
 export default {
+    Query: {
+        projectGitHistory: async (_, args, context) => {
+            const { cursor, pageSize, projectId } = args;
+            const { commits, hasNextPage } = await addMeteorUserToCall(context.user, () => Meteor.callWithPromise('getHistoryOfCommits', projectId, {
+                cursor,
+                pageSize,
+            }));
+            return {
+                commits,
+                pageInfo: {
+                    hasNextPage,
+                    endCursor: commits.length ? commits[commits.length - 1]?.sha : '',
+                },
+            };
+        },
+    },
     Mutation: {
         async import(_, args, context) {
             const {
@@ -14,7 +29,7 @@ export default {
                 fallbackLang,
                 wipeProject,
             } = args;
-            checkIfCan('projects:w', projectId, context.user._id);
+            checkIfCan('import:x', projectId, context.user._id);
             // files is a list of promises as the files get uploaded to the server
             const filesData = await Promise.all(files);
             // allows Meteor.userId to be called down the stack
